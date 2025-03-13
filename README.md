@@ -1,4 +1,6 @@
 # tidyverse-versus-sql
 This is my reference document for equivalent R tidyverse and SQL queries.
 
-The docs folder contains the R Markdown file, the HTML page, and a PDF. I recommend starting from the PDF if you would like to explore the full project!
+I recommend starting from the [web page](https://sarahansendata.github.io/tidyverse-versus-sql/) if you would like to explore the full project!
+
+The docs folder contains the R Markdown file and the HTML page.
