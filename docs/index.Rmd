@@ -1,0 +1,1955 @@
+---
+title: "Tidyverse Versus SQL"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: inline
+---
+
+```{css, echo=FALSE}
+.rcode {
+  background-color: #fffdf6;
+  border: 2px solid #e4d494;
+}
+```
+
+```{css, echo=FALSE}
+.sqlcode {
+  background-color: #f9fcfd;
+  border: 2px solid #3391a5;
+}
+```
+
+#### Sara Hansen, SaraHansenData
+#### Modified March 13, 2025
+
+### What are we doing here?
+The R tidyverse and Structured Query Language (SQL) are two ways we can interact with and shape data. The [tidyverse](https://www.tidyverse.org/) is a collection of R packages designed for data processing and analysis. [SQL](https://en.wikipedia.org/wiki/SQL) is a language specifically designed for data management. Both let us ask a question of a data table and get a subset of data back as a result set.
+
+While we can run many of the same commands in either of these, the grammar is sometimes very different. This is my reference document for equivalent base R / tidyverse and SQL commands. We'll be working in R and using the DBI package to process SQL chunks.
+
+### Who is this for?
+* R users learning the tidyverse
+* R tidyverse experts learning SQL
+* SQL experts learning the R tidyverse
+* Novice R or SQL users looking to expand their knowledge
+* Experts in both the R tidyverse and SQL looking for a few cool tricks
+
+### Let's get into it!
+
+# Load packages and adjust display settings
+```{r}
+library(tidyverse)
+library(DBI)
+library(nycflights13)
+
+options(max.print = 1e9)
+options(dplyr.print_max = 1e9)
+```
+<br>
+
+# Prep data
+We're working with the NYC Flights Database.
+The database has 5 tables. They contain information about airlines, airports, flights, planes and weather.
+
+To employ SQL, we'll first create a database in memory to use.
+```{r}
+con <- dbConnect(RSQLite::SQLite(), ":memory:")
+
+# The data tables are imported automatically with the package, so we can just put them in the SQL database
+
+dbWriteTable(con, "airlines", airlines)
+dbWriteTable(con, "airports", airports)
+dbWriteTable(con, "flights", flights)
+dbWriteTable(con, "planes", planes)
+dbWriteTable(con, "weather", weather)
+```
+<br>
+What are the tables in the database?
+```{r}
+dbListTables(con)
+```
+<br>
+We've loaded the data up. Now let's compare how we can get information from our database using tidyverse and SQL syntax. 
+
+For every R chunk, there will be a corresponding SQL chunk immediately after it that performs an equivalent action.
+<br>
+<br>
+What columns are in the table, and what are their types?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+glimpse(airlines) # this function also gives us a nice preview. Note that "chr" refers to character columns
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbColumnInfo(dbSendQuery(
+  con, "
+  SELECT *
+  FROM airlines
+  "))
+```
+<br>
+
+# Standard Queries
+
+### Select data
+**Selecting data is the basis of all data exploration and querying.** We just choose which part of which table we want to see and use the appropriate syntax to call it.
+
+Using R, seeing a whole data table is as simple as calling the table.
+
+##### R (base)
+```{r class.source = "rcode"}
+airports
+```
+<br>
+Using SQL, we select all columns from the table we want to see. (* means all)
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT *
+  FROM airports
+  ")
+```
+<br>
+Often, a table is too large to display all at once. It's helpful to limit the results that are printed.
+
+What do the first 10 rows of the flights table look like?
+
+##### R (base)
+```{r class.source = "rcode"}
+head(flights, 10)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT *
+  FROM airports
+  LIMIT 10
+  ")
+```
+<br>
+We can also select specific columns.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+weather %>%
+  select(month, day, hour, temp) %>%
+  head(10)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT month, day, hour, temp
+  FROM weather
+  LIMIT 10
+  ")
+```
+<br>
+
+### Filter results
+We often want to filter our queries to see only a subset of data.
+
+For example, all the flights from a specific carrier.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  filter(carrier == "OO")
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT *
+  FROM flights
+  WHERE carrier = 'OO'
+  ")
+```
+<br>
+We can use regular expressions or built-in functions in the tidyverse package stringr to filter based on values in strings.
+
+Which type of "Turbo" engines do the planes have?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+# stringr with regex
+planes %>%
+  filter(str_detect(engine, regex("^Turbo", ignore_case = TRUE))) %>%
+  distinct(engine)
+
+# stringr with specialized function
+planes %>%
+  filter(str_starts(engine, "Turbo|turbo")) %>%
+  distinct(engine)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+# with regex
+dbGetQuery(
+  con, "
+  SELECT DISTINCT(engine)
+  FROM planes
+  WHERE engine LIKE 'Turbo%'
+  ")
+```
+<br>
+Note that stringr function are case-sensitive, while SQL LIKE is case-insensitive.
+Watch out for different SQL "flavors" (e.g., MySQL, PostgreSQL, Oracle) because they all work a little differently for some tasks.
+
+We can also filter by multiple conditions.
+
+For example, flights by the carrier "OO" on a specific day.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  filter(carrier == "OO" & month == "9" & day == "20")
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT *
+  FROM flights
+  WHERE carrier = 'OO' AND month = 9 AND day = 20
+  ")
+```
+<br>
+What carrier is "OO" anyway?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+airlines %>%
+  filter(carrier == "OO") %>%
+  select(name)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT name
+  FROM airlines
+  WHERE carrier = 'OO'
+  ")
+```
+<br>
+
+### Order results
+We can return the results of a query in ascending or descending order by a specific column or columns.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+# Arrange in ascending order by one column
+planes %>%
+  arrange(year) %>%
+  head(20)
+# Arrange in descending order by one column
+planes %>%
+  arrange(desc(manufacturer)) %>%
+  head(20)
+# Arrange in ascending order by two columns
+planes %>%
+  arrange(engines, seats) %>%
+  head(20)
+# Arrange in ascending order by one column and descending order by another column
+planes %>%
+  arrange(engines, desc(seats)) %>%
+  head(20)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+# Arrange in ascending order by one column
+dbGetQuery(
+  con, "
+  SELECT *
+  FROM planes
+  WHERE year IS NOT NULL
+  ORDER BY year
+  LIMIT 20
+  ")
+# Arrange in descending order by one column
+dbGetQuery(
+  con, "
+  SELECT *
+  FROM planes
+  WHERE manufacturer IS NOT NULL
+  ORDER BY manufacturer DESC
+  LIMIT 20
+  ")
+# Arrange in ascending order by two columns
+dbGetQuery(
+  con, "
+  SELECT *
+  FROM planes
+  WHERE engines IS NOT NULL AND seats IS NOT NULL
+  ORDER BY engines, seats
+  LIMIT 20
+  ")
+# Arrange in ascending order by one column and descending order by another column
+dbGetQuery(
+  con, "
+  SELECT *
+  FROM planes
+  WHERE engines IS NOT NULL AND seats IS NOT NULL
+  ORDER BY engines, seats DESC
+  LIMIT 20
+  ")
+```
+<br>
+Notice that we had to tell SQL to ignore missing values, while R did this by default.
+<br>
+<br>
+Limiting, filtering, and ordering all put together can help us get specific information like the maximum value.
+
+What day in January had the most precipitation?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+weather %>%
+  filter(month == 1) %>%
+  arrange(desc(precip)) %>%
+  select(year, month, day) %>%
+  head(1)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT year, month, day
+  FROM weather
+  WHERE month = 1
+  ORDER BY precip DESC
+  LIMIT 1
+  ")
+```
+<br>
+We can order by any column we want, even if we aren't interested in seeing that particular column.
+In the above example, we ordered by precipitation to figure out which day had the most precipitation, but we didn't care about the actual precipitation value so we didn't select that column.
+<br>
+<br>
+**There are almost always multiple ways to get the same information from a query.**
+<br>
+<br>
+We'll explore all kinds of querying method as we go along.
+
+### Aggregate
+We can aggregate data to summarize them based on a specific metric.
+
+For example, we can count the total number of flights.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  count()
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT COUNT(*)
+  FROM flights
+  ")
+```
+<br>
+There are lots of aggregating functions we can use. We can calculate various types of counts or summary statistics like mean, median, min, and max.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+# How many unique types of planes are there?
+planes %>%
+  distinct(type) %>%
+  count()
+# What are the min, max, mean, and median altitudes of the airports?
+airports %>%
+  summarize(min(alt),
+            max(alt),
+            mean(alt),
+            median(alt))
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+# How many unique types of planes are there?
+dbGetQuery(
+  con, "
+  SELECT COUNT(DISTINCT(type))
+  FROM planes
+  ")
+# What are the min, max, mean, and median altitudes of the airports?
+dbGetQuery(
+  con, "
+  SELECT MIN(alt),
+         MAX(alt), 
+         AVG(alt),
+         MEDIAN(alt)
+  FROM airports
+  ")
+```
+<br>
+
+### Group
+So far, we aggregated all data at once. We can also aggregate by groups to get meaningful insights into our data.
+
+For example, how many flights left each airport?
+We'll group by airport and count the number of records, which are individual flights.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  count(origin) # the count() function automatically groups
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT origin, COUNT(*)
+  FROM flights
+  GROUP BY origin
+  ")
+```
+<br>
+What was the average monthly temperature at each airport?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+weather %>%
+  group_by(origin, month) %>%
+  summarize(mean(temp, na.rm = TRUE)) # note that if we have any missing values, we need na.rm = TRUE to ignore them
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT origin, month, AVG(temp)
+  FROM weather
+  GROUP BY origin, month
+  ") # In this case, missing values of temp are ignored by default
+```
+<br>
+
+### Adding columns
+Often, it makes sense to add a column to our tables, either for aggregating or just for storing.
+
+For example, if we want to know the average flight speed across all flights, we'll first create a column for each flight with its average speed, then aggregate on that column. 
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  mutate(speedMPH = distance/(air_time/60)) %>%
+  summarize(mean(speedMPH, na.rm = TRUE))
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT AVG(speedMPH)
+  FROM (SELECT (distance/(air_time/60)) as speedMPH
+        FROM flights)
+  ")
+```
+<br>
+Is there a way we could have done this without creating an extra column?
+Yes! We could have combined multiple calculations in one single call, but it would look a little messy. **It's a good idea to keep both efficiency and readability in mind when writing queries.**
+
+Sometimes, creating columns is a little more complicated. The "case when" statement is helpful in these situations.
+
+For a simple introduction to case when, we want to know whether each flight departed on time, early, or late.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  mutate(departure = case_when(sched_dep_time == dep_time ~ "on time",
+                               sched_dep_time < dep_time ~ "late",
+                               sched_dep_time > dep_time ~ "early")) %>%
+  select(sched_dep_time, dep_time, departure) %>%
+  head(10)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT sched_dep_time,
+         dep_time,
+         CASE WHEN sched_dep_time == dep_time THEN 'on time'
+              WHEN sched_dep_time < dep_time THEN 'late'
+              WHEN sched_dep_time > dep_time THEN 'early' END as departure
+  FROM flights
+  LIMIT 10
+  "
+  )
+```
+<br>
+Now a more complex application of case when: What was the count and proportion of short, medium, and long flights each season?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+# We'll make one categorical column that recasts months to seasons
+# We'll make another categorical column that categorizes a flight as short, medium, or long
+# Then we'll group by season to find the total flight count for each season
+# And finally calculate the count and proportion of each flight length per season
+flights %>%
+  mutate(season = case_when(between(month, 1, 3) ~ "winter",
+                            between(month, 4, 6) ~ "spring",
+                            between(month, 7, 9) ~ "summer",
+                            between(month, 10, 12) ~ "fall"),
+         distCat = case_when(distance < 500 ~ "short",
+                             between(distance, 500, 1500) ~ "medium",
+                             TRUE ~ "long")) %>%
+  group_by(season) %>%
+  mutate(total = n()) %>%
+  group_by(season, distCat) %>%
+  mutate(count = n(),
+         proportion = count/total) %>%
+  distinct(season, distCat, .keep_all = TRUE) %>%
+  select(season, distCat, count, proportion) %>%
+  arrange(season, distCat)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT DISTINCT season, distCat, count, proportion
+  FROM(
+       SELECT season, distCat, count, total, (CAST(count AS DOUBLE) / CAST(total AS DOUBLE)) AS proportion
+       FROM(
+            SELECT *, COUNT(*) OVER(PARTITION BY season) AS total
+            FROM(
+                 SELECT *, COUNT(*) OVER(PARTITION BY season, distCat) AS count
+                 FROM(
+                      SELECT *,
+                      CASE WHEN month BETWEEN 1 and 3 THEN 'winter'
+                           WHEN month BETWEEN 4 and 6 THEN 'spring'
+                           WHEN month BETWEEN 7 and 9 THEN 'summer'
+                           WHEN month BETWEEN 10 and 12 THEN 'fall' END as season,
+                      CASE WHEN distance < 500 THEN 'short'
+                           WHEN distance BETWEEN 500 and 1500 THEN 'medium'
+                           ELSE 'long' END AS distCat
+                      FROM flights) ) ) )
+  ")
+```
+<br>
+The nested queries we just used to aggregate multiple times are called subqueries. At a more basic level, subqueries are simply queries from a query. We have done a few already, like when we calculated average flight speed.
+
+Subqueries can also be used for matching specific conditions.
+
+For example, how many seats does the oldest plane have?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+# The first query is finding the minimum year
+# The second query is filtering for the plane with the minimum year and selecting the seats column
+planes %>%
+  filter(year == min(year, na.rm = TRUE)) %>%
+  select(seats)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+# The two separate queries are a little clearer when we see them in the SQL syntax
+dbGetQuery(
+  con, "
+  SELECT seats
+  FROM planes
+  WHERE year = (SELECT MIN(year)
+                FROM planes)
+  ")
+```
+<br>
+**Querying from a single table can give us a lot of information in the form we need it!**
+
+# Joins
+The NYC Flights Database is a relational database. A relational database is a group of tables with interconnected information. Relational databases are more efficient to store and use. They are really handy if you know how to use them. So far, we have only queried one table at a time. Very often, we'll need information from more than one table.
+
+Tables are connected by columns called keys. Each table will have at least one primary key, which is the identifier for each record. Tables may also have foreign keys, which point to a key in another table. **Keys are the backbone of relational data structure.**
+
+Let's dive in to a few examples of joining tables together on their keys.
+
+### Full join
+The first type of join we'll try out is a full join. **A full join will return all records from both tables, even if they are only found in one of the tables in the join.**
+
+If we look at the weather table, we can see the origin column has three-letter codes for airports.
+If we don't remember which code refers to each airport, this doesn't do us much good.
+We can join the airports table to the weather table to see the full name of the airports.
+
+In the airports table, one of the primary keys is called faa, which is the Federal Aviation Administration code for airports.
+In the weather table, there is a foreign key origin, which contains these same faa codes.
+
+We will join the tables based on those columns.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+# Scroll to the side in the output to see the "name" column.
+weather %>%
+  full_join(airports, by = c("origin" = "faa")) %>%
+  head(20)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT *
+  FROM weather
+  FULL JOIN airports
+  ON weather.origin = airports.faa
+  LIMIT 20
+  ")
+```
+<br>
+What is returned is every column of the weather table, then every column of the airports table except the faa column, which is already returned as origin. (Scroll to the right to see the airport names.) Note that the order of the tables in a full join doesn't matter; you'll get the same information either way, you'll just get the columns in a different order depending on which table is first. 
+
+We can combine joins with filtering, aggregating, subquerying - anything we want!
+
+Usually we'll want to do more than just join the entirety of two tables together.
+
+To help us simplify the results of the following joins, we're going to make a small temporary table from the flights table. It will contain only a subset of flights on a specific day so that we can focus on the joining syntax instead of filtering. This specific subset does not have any particular meaning, it just happens to illustrate the joins well.
+
+```{r}
+tempFlights <- flights %>%
+      filter(month == 2 & day == 2 & origin == "LGA" & flight >= 4500)
+
+# and add it to the database in memory for SQL
+dbWriteTable(con, "tempFlights", tempFlights)
+```
+<br>
+Let's join the information about flights to the information about planes, limiting the number of columns and the number of results returned to make it easier to explore.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+tempFlights %>%
+  select(flight, origin, tailnum) %>%
+  full_join(planes %>% select(tailnum, model, manufacturer), by = "tailnum") %>%
+  head(10)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT tempFlights.flight, tempFlights.origin, tempFlights.tailnum,
+         planes.model, planes.manufacturer
+  FROM tempFlights
+  FULL JOIN planes
+  ON tempFlights.tailnum = planes.tailnum
+  LIMIT 10
+  "
+)
+```
+<br>
+As you can see, some rows have missing values for model and manufacturer.
+This is because a full join returns all rows, whether they match across tables or not.
+The rows with missing model and manufacturer are flights with planes that are not in the planes table.
+When designing your own database, you would probably want a record for every plane - but real-world data are imperfect!
+
+### Inner join
+The next type of join we'll try out is an inner join. **An inner join will return only the records that are shared by both tables we're joining.**
+
+Using the same example above, now we'll only get information from the flights that have corresponding plane information and vice versa.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+tempFlights %>%
+  select(flight, origin, tailnum) %>%
+  inner_join(planes %>% select(tailnum, model, manufacturer), by = "tailnum")
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT tempFlights.flight, tempFlights.origin, tempFlights.tailnum,
+         planes.model, planes.manufacturer
+  FROM tempFlights
+  INNER JOIN planes
+  ON tempFlights.tailnum = planes.tailnum
+  "
+)
+```
+<br>
+There are no more missing values because the inner join returned only the records shared by both tables.
+Like a full join, the order of tables in an inner join doesn't matter, it will only affect the column order.
+
+### Left join
+Another useful type of join is the left join. **A left join will return all records from the first table (the one on the left) and any matching information from the second table (the one on the right).** Unlike a full join or inner join, the order of tables in a left join will affect the results.
+
+Let's say we want information about all the flights, plus information about planes if it exists.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+tempFlights %>%
+  select(flight, origin, tailnum) %>%
+  left_join(planes %>% select(tailnum, model, manufacturer), by = "tailnum") %>%
+  arrange(flight) %>% # arranging is not necessary, just helpful for visualizing in this case
+  head(10)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT tempFlights.flight, tempFlights.origin, tempFlights.tailnum,
+         planes.model, planes.manufacturer
+  FROM tempFlights
+  LEFT JOIN planes
+  ON tempFlights.tailnum = planes.tailnum
+  ORDER BY flight
+  LIMIT 10
+  "
+)
+```
+<br>
+Notice there are some missing values for model and manufacturer again. This is because a left join will give us everything in the left table (tempFlights) whether or not it has corresponding information in the right table (planes).
+
+Also notice that this left join ended up being the same as the full join. **Sometimes multiple types of joins will return equivalent information, so always make sure you select the join that matches the type of information you need.**
+
+### Right join
+A right join is the exact opposite of a left join. **A right join will return everything from the right table and any corresponding information that exists in the left table.**
+
+If we change the order of the tempFlights and planes tables, then a right join will give us the same information as the left join we just did. We're selecting columns in a different order so that the first table's columns go first, but remember we can always choose whatever column order we like in our queries.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+planes %>%
+  select(tailnum, model, manufacturer) %>%
+  right_join(tempFlights %>% select(flight, origin, tailnum), by = "tailnum") %>%
+  arrange(flight) %>%
+  head(10)
+
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT tempFlights.tailnum, planes.model, planes.manufacturer,
+         tempFlights.flight, tempFlights.origin
+  FROM planes
+  RIGHT JOIN tempFlights
+  ON planes.tailnum = tempFlights.tailnum
+  ORDER BY flight
+  LIMIT 10
+  "
+)
+```
+<br>
+**No matter the order of columns in a data table, we can select whatever column order we want in a query.**
+
+### Anti join
+Lots of flights have a tailnum but no model and manufacturer. What if we want to know just the flights that are missing this information?
+
+We could accomplish this with an anti join. **An anti join will return only the records in the left table that have no match in the right table.**
+
+How many flights used planes that have no record in the planes table?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  filter(!is.na(tailnum)) %>%
+  anti_join(planes, by = "tailnum") %>%
+  count()
+```
+<br>
+
+Most flavors of SQL don't have a dedicated operator for anti joins, so we need to use the WHERE operator instead.
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT COUNT(*)
+  FROM flights
+  WHERE tailnum NOT IN (SELECT tailnum
+                        FROM planes)
+  "
+)
+```
+<br>
+Did you catch the slight difference between the R and SQL chunks above?
+In the R chunk, we first filtered for flights that had a value for tailnum, excluding any that were NA.
+We didn't do this for the SQL chunk because this was implied in our WHERE statement.
+You can see that R's anti_join function and SQL's anti join with WHERE behave differently.
+
+What columns are returned by an anti join?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  filter(!is.na(tailnum)) %>%
+  anti_join(planes, by = "tailnum") %>%
+  glimpse()
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbColumnInfo(dbSendQuery(
+  con, "
+  SELECT *
+  FROM flights
+  WHERE tailnum NOT IN (SELECT tailnum
+                        FROM planes)
+  "))
+```
+<br>
+As you can see, the anti join only returns the columns in the first table. This is because an anti join is a type of filtering join. We're not looking to combine information from two tables, we're looking to filter one table based on the contents of another.
+
+### Semi join
+The last type of join we'll try out is a semi join. A semi join is the opposite of an anti join. **A semi join returns all records from the left table that have a match in the right table.**
+<br>
+<br>
+**Anti joins and semi joins always return the columns from the left table only.**
+<br>
+<br>
+How many flights used planes that do have a record in the planes table?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  filter(!is.na(tailnum)) %>%
+  semi_join(planes, by = "tailnum") %>%
+  count()
+```
+<br>
+
+Like with the anti join, we can simply use the WHERE operator to do a semi join in SQL.
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT COUNT(*)
+  FROM flights
+  WHERE tailnum IN (SELECT tailnum
+                    FROM planes)
+  "
+)
+```
+<br>
+If there were no missing values of tailnum in the flights table, then the count from the anti join and the count from the semi join added together would be the total count of records in the flights table.
+
+Remember, we'll get only the columns from the left table when we do a semi join.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  filter(!is.na(tailnum)) %>%
+  semi_join(planes, by = "tailnum") %>%
+  glimpse()
+  
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbColumnInfo(dbSendQuery(
+  con, "
+  SELECT *
+  FROM flights
+  WHERE tailnum IN (SELECT tailnum
+                    FROM planes)
+  "))
+```
+<br>
+
+### To summarize:
+A full join returns all records and all columns from both tables.
+
+An inner join returns shared records and all columns from both tables.
+
+A left join returns all records and all columns from the first (left) table and matching records and all columns from the second (right) table.
+
+A right join is the inverse of a left join. A right join returns all records and all columns from the right table and matching records and all columns from the left table.
+
+An anti join returns all columns from the first table, but only the records with no match in the second table.
+
+A semi join returns all columns from the first table, but only the records with a match in the second table.
+<br>
+<br>
+**As you saw, joins are a way to get information from multiple tables in a single query!**
+
+# Set Operations
+Set operations combine two (or more) query results. These can be any type of query (including ones with subqueries). Set operations can combine rows from multiple tables, similar to how joins can combine columns from multiple tables.
+
+There are three types of set operations in SQL: Unions, Intersections, and Exceptions.
+
+Let's try them out.
+
+### Union all
+Unions stack the rows from two queries on top of each other. Union all will return all rows, even if they're duplicated.
+
+What are all the tail numbers for planes in the database? (excluding missing)
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+# What are the tail numbers?
+planes %>%
+  select(tailnum) %>%
+  bind_rows(flights %>% select(tailnum)) %>%
+  filter(!is.na(tailnum)) %>%
+  arrange(tailnum)
+# How many rows is that?
+planes %>%
+  select(tailnum) %>%
+  bind_rows(flights %>% select(tailnum)) %>%
+  filter(!is.na(tailnum)) %>%
+  arrange(tailnum) %>%
+  count()
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+# What are the tail numbers?
+dbGetQuery(
+  con, "
+  SELECT tailnum
+  FROM planes
+  UNION ALL
+  SELECT tailnum
+  FROM flights
+  WHERE tailnum IS NOT NULL
+  ORDER BY tailnum
+  "
+)
+# How many rows is that?
+dbGetQuery(
+  con, "
+  SELECT COUNT(*)
+  FROM(
+  SELECT tailnum
+  FROM planes
+  UNION ALL
+  SELECT tailnum
+  FROM flights
+  WHERE tailnum IS NOT NULL
+  ORDER BY tailnum)
+  "
+)
+```
+<br>
+Different tail numbers are found in these two tables, which is where this union comes in handy.
+
+### Union
+What if we didn't want the duplicates? We can use a different type of union that includes only one of each returned value. In the R tidyverse, we can use the distinct() function to return only unique values. In SQL, we simply leave out ALL when we use UNION.
+
+What are all the unique tail numbers in the database?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+# What are the unique tail numbers?
+   # adding distinct() removes duplicates
+planes %>%
+  select(tailnum) %>%
+  bind_rows(flights %>% select(tailnum)) %>%
+  filter(!is.na(tailnum)) %>%
+  distinct(tailnum) %>%
+  arrange(tailnum)
+# How many rows is that?
+planes %>%
+  select(tailnum) %>%
+  bind_rows(flights %>% select(tailnum)) %>%
+  filter(!is.na(tailnum)) %>%
+  distinct(tailnum) %>%
+  arrange(tailnum) %>%
+  count()
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+# What are the unique tail numbers?
+dbGetQuery(
+  con, "
+  SELECT tailnum
+  FROM planes
+  UNION
+  SELECT tailnum
+  FROM flights
+  WHERE tailnum IS NOT NULL
+  ORDER BY tailnum
+  "
+)
+# How many rows is that?
+dbGetQuery(
+  con, "
+  SELECT COUNT(*)
+  FROM(
+  SELECT tailnum
+  FROM planes
+  UNION
+  SELECT tailnum
+  FROM flights
+  WHERE tailnum IS NOT NULL
+  ORDER BY tailnum)
+  "
+)
+```
+<br>
+Union all returns duplicates, whereas union without all returns only one of each value. Notice that when we used union all, we got 337,586 rows in the result, which is more rows than either table on its own. When we used union, we got 4,043 rows, which is the number of unique tail numbers across both tables.
+
+### Intersect
+Intersections combine only the rows returned by both queries.
+
+What tail numbers are present in both the flights and planes table?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+planes %>%
+  select(tailnum) %>%
+  intersect(flights %>% select(tailnum)) %>%
+  filter(!is.na(tailnum)) %>%
+  arrange(tailnum)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT tailnum
+  FROM planes
+  INTERSECT
+  SELECT tailnum
+  FROM flights
+  WHERE tailnum IS NOT NULL
+  ORDER BY tailnum
+  "
+)
+```
+<br>
+Intersections only return the unique values, no duplicates. Notice that we got 3,322 rows, fewer than when we used union, because intersect only looks for values shared by both tables. 
+
+Which join would give us the same information as using an intersect operator?
+If you said an inner join, you would be correct!
+Remember, there are almost always multiple ways to get the same information from our data.
+
+### Exception
+Exceptions are also called set difference or minus. They are the inverse of an intersection.
+
+What tail numbers are present in the flights table but not the planes table?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  select(tailnum) %>%
+  setdiff(planes %>% select(tailnum)) %>% # setdiff() is R's way of expressing except
+  filter(!is.na(tailnum)) %>%
+  arrange(tailnum)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT tailnum
+  FROM flights
+  WHERE tailnum IS NOT NULL
+  EXCEPT
+  SELECT tailnum
+  FROM planes
+  WHERE tailnum IS NOT NULL
+  ORDER BY tailnum
+  "
+)
+```
+<br>
+Which join gives the same information as an except operator?
+An anti join!
+<br>
+<br>
+**Set operations are a way to combine the results of multiple queries in one output.**
+
+# Window Functions
+Window functions allow us to calculate some type of information across rows. They're useful when we're interested in looking at multiple records at once, rather than a single record at a time.
+
+Window functions include numbering rows, ranking values, and calculating differences across rows (lag and lead).
+
+### Row number
+Database tables are considered unordered, meaning the location of a row isn't necessarily meaningful in the context of the entire table and database. However, there is often an intuitive way to order a table for a specific query.
+
+What are the 10 shortest flights?
+In this case, the ordering is by the flight distance.
+
+##### R (tidyverse with simple filtering)
+```{r class.source = "rcode"}
+flights %>%
+  arrange(distance) %>% # ascending is the default for arrange()
+  mutate(rowNumber = row_number()) %>%
+  filter(rowNumber <= 10) %>%
+  select(distance, rowNumber)
+```
+<br>
+<br>
+The tidyverse also has several slice() functions that can grab a "slice" of rows from our data. In this case, we can use slice_min() and simplify the query.
+
+##### R (tidyverse with slice())
+```{r class.source = "rcode"}
+flights %>%
+  slice_min(n = 10, order_by = distance) %>%
+  select(distance) # we dont' have a ranking column, so we'll just return the distance
+```
+<br>
+
+##### SQL
+All window functions in SQL require OVER. The ROW_NUMBER() window function uses ORDER BY to determine the order of rows before the window function gets applied.
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT distance,
+  ROW_NUMBER() OVER (ORDER BY distance) AS rowNumber
+  FROM flights
+  ORDER BY rowNumber
+  LIMIT 10
+  ")
+```
+<br>
+You probably already noticed that we used R and SQL a little differently here. For R, we applied a filter on the new column we created from the window function. For SQL, we ordered by new column and limited the results. In both cases, we didn't technically need to use the row numbering window function at all! We could have simply ordered by the distance.
+
+But what if we didn't want the shortest 10 or the longest 10 flights? What if we wanted to know about flights in the middle? Window functions are particularly useful for cases like this. While there are almost always multiple ways to achieve the query you are looking for in both R and SQL, window functions make certain queries much simpler and more intuitive.
+
+What are the 102175th through the 102184th shortest flights?
+102175 and 102184 are random numbers to illustrate how to get a chunk of data in the middle of the window.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  arrange(distance) %>%
+  mutate(rowNumber = row_number()) %>%
+  filter(rowNumber >= 102175 & rowNumber <= 102184) %>%
+  select(distance, rowNumber)
+```
+<br>
+
+##### SQL
+We will have to use a simple subquery in order to filter on the new column.
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT *
+  FROM(
+       SELECT distance,
+       ROW_NUMBER() OVER (ORDER BY distance) AS rowNumber
+       FROM flights)
+  WHERE rowNumber BETWEEN 102175 AND 102184
+  ")
+```
+<br>
+Even though we had to use a subquery, it was simpler to use the window function than to construct a more complicate subquery with no window function.
+
+### Ranking
+Ranking is another useful type of window function. Like the row numbering window functions we just used, it orders rows and assigns numbers to them. However, rather than giving each row a unique number, ranking functions use the value of some column(s) to determine a rank, which means some rows can have the same numbers assigned. 
+
+Let's rank the flights in the same order we just used. Note that we're going to keep the row numbering function so we can compare row numbering vs. ranking.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  arrange(distance) %>%
+  mutate(rowNumber = row_number(),
+         rankNumber = min_rank(distance)) %>%
+  filter(rowNumber >= 102175 & rowNumber <= 102184) %>%
+  select(distance, rowNumber, rankNumber)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT *
+  FROM(
+       SELECT distance,
+       ROW_NUMBER() OVER (ORDER BY distance) AS rowNumber,
+       RANK() OVER (ORDER BY distance) AS rankNumber
+       FROM flights)
+  WHERE rowNumber BETWEEN 102175 AND 102184
+  ")
+```
+<br>
+Notice that if two flights have the same distance, they have the same rank. This makes sense! Sometimes, we want to know the row number and let R or SQL handle how rows are arranged when their values are the same. Other times, we want to know the order of rows based on the true values of whatever column we are ranking by.
+
+Notice how the ranking column skips some numbers. We go from 102123 to 102179 to 102182. What happened to the numbers in between? 
+
+Standard ranking bases the rank on the first row that appears with that value. 
+
+Say you are competing in a game with three other people. You scored 5 points, the next person scored 6 points, the next person scored 8 points, and the next person scored 9 points. Because you have the fourth most points, you take 4th place out of the four competitors. Now imagine that two of your competitors had exactly the same score. You scored 5 points, the next person scored 6 points, and the other two people each scored 9 points. You might still be considered 4th place, but now you have the third most points out of three possible point values.
+
+### Dense ranking
+Dense ranking is another way of ranking that does not skip any values.
+
+Let's use row numbering, ranking, and dense ranking and compare them.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  arrange(distance) %>%
+  mutate(rowNumber = row_number(),
+         rankNumber = min_rank(distance),
+         denseRankNumber = dense_rank(distance)) %>%
+  filter(rowNumber >= 102175 & rowNumber <= 102184) %>%
+  select(distance, rowNumber, rankNumber, denseRankNumber)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT *
+  FROM(
+       SELECT distance,
+       ROW_NUMBER() OVER (ORDER BY distance) AS rowNumber,
+       RANK() OVER (ORDER BY distance) AS rankNumber,
+       DENSE_RANK() OVER (ORDER BY distance) AS denseRankNumber
+       FROM flights)
+  WHERE rowNumber BETWEEN 102175 AND 102184
+  ")
+```
+<br>
+Notice that the dense ranking does not skip any values, whereas the standard ranking does. The dense ranked numbers are also smaller, because no value were skipped earlier in the window.
+
+Row numbering, ranking, and dense ranking all apply numbers based on the order of our data, but the particular window function we choose depends on what exactly we need to know.
+
+For example, how many flights has the 10th largest distance?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  arrange(desc(distance)) %>%
+  mutate(denseRankNumber = dense_rank(desc(distance))) %>%
+  filter(denseRankNumber == 10) %>%
+  count()
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT COUNT(*)
+  FROM(
+       SELECT distance,
+       DENSE_RANK() OVER (ORDER BY distance DESC) AS denseRankNumber
+       FROM flights)
+  WHERE denseRankNumber = 10
+  ")
+```
+<br>
+In this case, dense ranking was perfect for our needs. Row numbering wouldn't have given us any information, and standard ranking might have skipped the 10th rank altogether.
+
+### Lag and lead
+Another type of window function allows us to compare each row to the rows around it. Lag compares each row to the row before it, based on the ordering you define, and lead compares each row to the row after it.
+
+For example, what is the change in temperature each hour at the JFK station?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+weather %>%
+  filter(origin == "JFK") %>%
+  arrange(time_hour) %>%
+  mutate(change = temp - lag(temp)) %>%
+  select(time_hour, temp, change) %>%
+  head(10)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT time_hour, temp,
+  temp - LAG(temp, 1) OVER (ORDER BY time_hour) AS change
+  FROM weather
+  WHERE origin = 'JFK'
+  LIMIT 10
+  ")
+# LAG(temp, 1) tells SQL we want to calculate the lag on the temp column and use the 1 previous row for each row
+# ORDER BY time_hour tells SQL we want to calculate the change each hour, in order
+```
+<br>
+Notice that the value of the change for the first row is NA. This is because there is no previous temperature to compare the first hour to, so no change is calculated.
+<br>
+<br>
+**Lag is more common for a lot of uses than lead, but they are simply opposites.**
+<br>
+
+What will be the change in temperature in the next hour?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+weather %>%
+  filter(origin == "JFK") %>%
+  arrange(time_hour) %>%
+  mutate(change = lead(temp) - temp) %>%
+  select(time_hour, temp, change) %>%
+  head(10)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT time_hour, temp,
+  LEAD(temp, 1) OVER (ORDER BY time_hour) - temp AS change
+  FROM weather
+  WHERE origin = 'JFK'
+  LIMIT 10
+  ")
+```
+<br>
+
+### Partitioning
+So far, we have used window functions based on an order defined for an entire table. However, we often want to group our data before applying the window function. In these cases, partitioning comes in handy.
+
+For example, what is the minimum, average, and maximum temperature each day at the JFK station?
+
+Notice that R simply using grouping to get this answer, while SQL can use either partitioning or grouping. It's another example of the many ways we can achieve the same result! In some situations, partitioning in SQL is necessary because the grouping won't be applied at the part of the data processing that we need it to be.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+weather %>%
+  filter(origin == "JFK") %>%
+  group_by(year, month, day) %>% # partititioning by date
+  summarize(minTemp = min(temp),
+            avgTemp = mean(temp),
+            maxTemp = max(temp)) %>%
+  select(year, month, day, minTemp, avgTemp, maxTemp) %>%
+  head(10)
+```
+<br>
+
+In SQL, we can achieve the same result with or without using the window functions.
+
+##### SQL (with window functions)
+```{r class.source = "sqlcode"}
+# We include the subquery so that we could retain only distinct rows, because SQL wants to return the same number of rows we started with, so we would get multiple rows for each day with the same information.
+dbGetQuery(
+  con, "
+  SELECT DISTINCT *
+  FROM(
+       SELECT year, month, day,
+       MIN(temp) OVER (PARTITION BY year, month, day) AS minTemp,
+       AVG(temp) OVER (PARTITION BY year, month, day) AS avgTemp,
+       MAX(temp) OVER (PARTITION BY year, month, day) AS maxTemp
+       FROM weather
+       WHERE origin = 'JFK')
+  LIMIT 10
+  ")
+```
+<br>
+
+##### SQL (without window functions)
+```{r class.source = "sqlcode"}
+
+dbGetQuery(
+  con, "
+  SELECT year, month, day,
+  MIN(temp) AS minTemp,
+  AVG(temp) AS avgTemp,
+  MAX(temp) AS maxTemp
+  FROM weather
+  WHERE origin = 'JFK'
+  GROUP BY year, month, day
+  LIMIT 10
+  ")
+```
+<br>
+
+What is the second highest temperature each month, and where and when did it happen?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+weather %>%
+  filter(!is.na(temp)) %>%
+  group_by(month) %>%
+  mutate(tempRank = dense_rank(desc(temp))) %>%
+  filter(tempRank == 2) %>%
+  arrange(month, day) %>%
+  select(origin, month, day, temp, tempRank)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT origin, month, day, temp, tempRank
+  FROM(
+       SELECT *,
+       DENSE_RANK() OVER (PARTITION BY month ORDER BY temp DESC) AS tempRank
+       FROM weather)
+  WHERE tempRank = 2
+  ORDER BY month, day
+  ")
+```
+<br>
+You'll notice that the query returned multiple rows for most months. This is because we used dense ranking, and sometimes the same monthly maximum temperature was recorded at multiple sites and on multiple days. In January, the single highest temperature occurred at EWR on the 30th of the month, but in April, the highest temperature occurred at EWR and JFK on the 9th of the month.
+
+We can also use partitioning to return multiple values from each group.
+
+For example, what were the top two and bottom two temperatures in each month?
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+# In this example, we used distinct() to limit our results so we didn't get multiple identical rows returned when a given temperature occurred multiple times on one day. 
+weather %>%
+  filter(!is.na(temp)) %>%
+  group_by(month) %>%
+  mutate(tempRank = dense_rank(desc(temp))) %>%
+  filter(tempRank <= 2 | tempRank >= (max(tempRank) - 1)) %>%
+  arrange(month, desc(temp)) %>%
+  distinct(month, day, temp, tempRank, .keep_all = TRUE) %>%
+  select(origin, month, day, temp, tempRank)
+```
+<br>
+Using SQL, a pretty clean way is actually to create two ranks, one going in each direction.
+
+##### SQL
+```{r class.source = "sqlcode"}
+# Using a few nested queries is helpful to generate the values and then pull out only the distinct ones.
+# If we didn't build two different ranks, it would take a lot more complicated nested queries.
+dbGetQuery(
+  con, "
+  SELECT DISTINCT *
+  FROM(
+  SELECT origin, month, day, temp, tempRank
+  FROM(
+       SELECT *,
+       DENSE_RANK() OVER (PARTITION BY month ORDER BY temp DESC) AS tempRank,
+       DENSE_RANK() OVER (PARTITION BY month ORDER BY temp) AS tempRankRev
+       FROM weather
+       WHERE temp IS NOT NULL)
+  WHERE tempRank <= 2 OR tempRankRev <= 2)
+  GROUP BY month, day, temp, tempRank
+  ORDER BY month, temp DESC
+  ")
+```
+<br>
+
+### Moving statistics
+Window functions are great for calculating moving statistics, like moving average, moving sum, etc.
+
+In this example, we'll look at one airport on one day (JFK on May 30) and see how the average temperature changes over time.
+In the R tidyverse, there are a variety of cumulative functions in the dplyr package. We'll use the function for the cumulative mean.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+weather %>%
+  filter(origin == "JFK" & month == 5 & day == 30) %>%
+  arrange(hour) %>% # order rows by hour
+  mutate(movingAvg = cummean(temp)) %>% # calculate the moving average
+  select(hour, temp, movingAvg) # select relevant columns
+```
+<br>
+To calculate a moving average in SQL, we'll use OVER. We order by hour because we want to look at the change over the course of the day. For each row (i.e., each hour), we calculate the average over all the rows before the current row plus the current row. 
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT hour, temp,
+  AVG(temp) OVER (ORDER BY hour ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS movingAvg
+  FROM weather
+  WHERE origin = 'JFK' AND month = 5 AND day = 30
+  ")
+```
+<br>
+Notice that the moving average changes very little at the beginning of the day because the temperatures are fairly even. Then as the temperature changes more later in the day, the moving average still doesn't change that much because there are more and more rows going into the average. Even though the change in temperature from hour 6 to hour 7 was about 4 degrees, the moving average only changes by about 1 degree.
+
+What if we want a moving average that only used a few rows at a time? Here we'll calculate a 5-hour moving average, which will average across the 4 rows before each row plus the current row.
+There is no built-in functionality for this in the tidyverse, but we can employ lagging.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+weather %>%
+  filter(origin == "JFK" & month == 5 & day == 30) %>%
+  arrange(hour) %>% # order rows by hour
+  mutate(lagfour = lag(temp, 4), # make one column for each previous row
+         lagthree = lag(temp, 3),
+         lagtwo = lag(temp, 2),
+         lagone = lag(temp, 1)) %>%
+  group_by(hour, temp) %>% # make each row its own group
+  summarize(fiveHourMovingAvg = mean(c(lagfour, lagthree, lagtwo, lagone, temp), na.rm = TRUE)) # calculate the moving average
+# We had to group each row by itself for the summarization to work across the row, rather than across the whole table.
+# We did not need to include the temp column in the grouping, but it allowed us to see that column in the result.
+# Notice how for the first four rows, the average includes fewer than five rows because there are not five rows available.
+# We could have filled those first four rows with NA if we set na.rm to FALSE in the mean function.
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT hour, temp,
+  AVG(temp) OVER (ORDER BY hour ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS movingAvg
+  FROM weather
+  WHERE origin = 'JFK' AND month = 5 AND day = 30
+  ")
+# The only thing we need to change compared to the full-table moving average is the "ROWS BETWEEN N PRECEDING" portion.
+# We changed from "UNBOUNDED" to 4.
+```
+<br>
+As you can see from the above example, SQL is great at moving statistics and it's very easy to customize the number of rows to use.
+
+For a practical example of a moving statistic, let's say that every pilot flies three consecutive flights. The airline wants to make sure their pilots aren't too fatigued, so they decide that the total length of the three consecutive flights cannot exceed 9,000 miles (which is much more than a real pilot would ever fly consecutively). We want to make sure the airline is sticking to this policy.
+
+For simplicity's sake, we'll ignore the specific airports and assume that any pilot can fly out of any airport. Also, we're pretending that one pilot can fly out at 5:00 and fly out again at 5:01. No matter the time, a single pilot goes on three consecutive flights.
+
+ We can calculate the distance of each group of three flights using grouping and a moving sum.
+ 
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  filter(!is.na(dep_time)) %>% # if a flight didn't leave, we don't care about it
+  arrange(month, day, dep_time) %>% # order flights by where and when they leave
+  mutate(flightGroup = ntile(row_number(), n = round(n()/3, 0))) %>% # group flights into groups of 3
+  group_by(flightGroup) %>%
+  mutate(flightNum = row_number()) %>% # number each flight 1, 2, or 3 to see which flight exceeds the maximum distance
+  mutate(movingSum = cumsum(distance)) %>% # calculate cumulative distance
+  ungroup() %>%
+  filter(movingSum > 9000) %>% # filter for flight groups exceeding maximum allowed distance
+  select(month, day, dep_time, flightNum, distance, movingSum) # select relevant columns
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+# The innermost query uses COUNT to determine how many 3-flights groups we have and WHERE to take out any flights that didn't take off
+# The second query uses NTILE to divide the table into the 3-flight groups
+# The third query uses ROW_NUMBER to label the flights 1, 2, or 3 in each group
+# The fourth query uses SUM to calculate the moving sum within each 3-flight group
+# The fifth and outermost query selects the relevant columns and filters for rows where the moving sum is more than 9,000 miles
+dbGetQuery(
+  con, "
+  SELECT month, day, dep_time, flightNum, distance, movingSum
+  FROM(
+  SELECT *, SUM(distance) OVER (PARTITION BY flightGroup ORDER BY flightGroup, flightNum) AS movingSum
+  FROM(
+  SELECT *, ROW_NUMBER() OVER (PARTITION BY flightGroup ORDER BY month, day, dep_time) AS flightNum
+    FROM (
+        SELECT *, NTILE(numGroups) OVER (ORDER BY month, day, dep_time) AS flightGroup
+        FROM (
+              SELECT *, (SELECT ROUND(COUNT(*)/3, 0) FROM flights WHERE dep_time IS NOT NULL) AS numGroups
+              FROM flights
+              WHERE dep_time IS NOT NULL) ) ) )
+  WHERE movingSum > 9000
+  "
+)
+```
+<br>
+Yikes! The 9,000-mile limit was exceeded 31 times. On December 11, one flight group exceeded the limit after only the 2nd flight!
+<br>
+<br>
+**Window functions let us make calculations across multiple rows at once.**
+
+# Common Table Expressions
+As we build more and more complex queries, it can be hard to keep track of multiple layers of queries at once. Common Table Expressions (CTEs) are one option SQL gives us to simplify our queries. We create a CTE from a query, then use it in another query so we don't have to stack them together in one big, nested query. 
+In R, there is actually no direct equivalent to a CTE because of the way R handles tables. Typically when using R, we read in data from an external source, do whatever we need to with the data within R, and then save any changes by writing out the data. Any tables, variables, or other objects we create in R are temporary - they disappear at the end of our R session unless we save them to a specific place.
+
+Typically when using SQL, we are interacting directly with a database. Changes we make to our SQL tables are immediately reflected in the database and will remain after we close our SQL session.
+
+This means that all tables are "temporary" by default in R, and all tables in SQL are "permanent" in the database. CTEs help us create a temporary instance of a query result to make our lives easier without making any actual additions or changes to our database. 
+
+Let's see CTEs in action, revisting a subquery we used before to calculate the average flight speed across all flights.
+
+### Using Subqueries
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  mutate(speedMPH = distance/(air_time/60)) %>%
+  summarize(mean(speedMPH, na.rm = TRUE))
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT AVG(speedMPH)
+  FROM (SELECT (distance/(air_time/60)) as speedMPH
+        FROM flights)
+  ")
+```
+<br>
+With the subquery method, the inner query calculates the average speed for each flight individually, then the outer query calculates the average of all the averages.
+
+### Using CTEs
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+avgSpeeds <- flights %>%
+  mutate(speedMPH = distance/(air_time/60)) # Step 1: Make a table from a query
+
+avgSpeeds %>%
+  summarize(mean(speedMPH, na.rm = TRUE)) # Step 2: Query from the table
+```
+<br>
+R has no direct equivalent of a CTE, so we can simply make a regular table and query from it. The table will disappear at the end of the R session.
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  WITH avgSpeeds AS
+  (SELECT (distance/(air_time/60)) as speedMPH
+                FROM flights)
+  
+  SELECT AVG(speedMPH)
+  FROM avgSpeeds
+  "
+  )
+```
+<br>
+In SQL, we used WITH to make a temporary result set (i.e., a CTE), then queried from it. 
+<br>
+<br>
+**You can probably see how CTEs would be very useful with more and more complex queries and subqueries!**
+
+# Data Manipulation
+Database tables rarely have the information we need in the exact format we need it. So far, we have used many types of queries, joins, and more to select and calculate columns. But what if a column doesn't have quite what we need? This is where knowing how to manipulate data comes in handy. 
+
+*Note: In both R and SQL, we can edit the data in an actual table, or we can simply change the way it displays in a query. So far we have been working with queries rather than editing actual tables. We will continue working with queries here; we are manipulating what displays, not what exists in the table being queried.*
+
+### String Manipulation
+Strings are sequences of text characters. We have a lot of options for editing how strings display.
+
+For example, we can display a string in all uppercase letters.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+airlines %>%
+  mutate(name = str_to_upper(name)) %>%
+  select(name)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT UPPER(name)
+  FROM airlines
+  "
+  )
+```
+<br>
+Just as easily, we can display a string in all lowercase letters.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+airlines %>%
+  mutate(name = str_to_lower(name)) %>%
+  select(name)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT LOWER(name)
+  FROM airlines
+  "
+  )
+```
+<br>
+Perhaps we want to remove all whitespace from a string. Here we will use string replacement to accomplish this.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+airlines %>%
+  mutate(name = str_replace_all(name, " ", "")) %>% # Define the column, what to replace, and the replacement
+  select(name)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT REPLACE(name, ' ', '')
+  FROM airlines
+  "
+  )
+```
+<br>
+We can do any kind of string replacements we want. Let's try replacing "Inc." with "Incorporated"
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+airlines %>%
+  mutate(name = str_replace_all(name, "Inc.", "Incorporated")) %>%
+  select(name)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT REPLACE(name, 'Inc.', 'Incorporated')
+  FROM airlines
+  "
+  )
+```
+<br>
+If we want to know both the code and the full name of the airline in one column, we can concatenate (aka paste) the strings together.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+airlines %>%
+  mutate(fullName = paste0(carrier, ", ", name)) %>%
+  select(fullName)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT CONCAT(carrier, ', ', name) AS fullName
+  FROM airlines
+  "
+  )
+```
+<br>
+Remember, none of these queries manipulated the actual data in the table.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+airlines %>%
+  select(name)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT name
+  FROM airlines
+  "
+  )
+```
+<br>
+
+### Number Manipulation
+Just like with strings, we can manipulate numeric columns to get the specific information we need. We already did some number manipulation earlier when we rounded outputs to specified numbers of digits. We'll try out a few more ways of manipulating numeric data here.
+
+Let's say we want to model some of the variables in the weather table. We are interested in determining how temperature, humidity, and wind speed influence visibility. (We won't really model the data, but this is a potential use of them.) Because we are experts on these different types of data, we know that there are some transformations we should apply before modeling. We'll transform each variable differently, then look at the output.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+weather %>%
+  mutate(transform_temp = sqrt(temp), # square root transformation
+         transform_humid = log(humid), # log transformation
+         transform_wind = wind_speed/2) %>% # dividing value by 2
+  select(temp, transform_temp, humid, transform_humid, wind_speed, transform_wind) %>%
+  head(10)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT temp,
+         SQRT(temp) AS transform_temp,
+         humid,
+         LOG(humid) AS transform_humid,
+         wind_speed,
+         wind_speed/2 AS transform_wind
+  FROM weather
+  LIMIT 10
+  "
+  )
+```
+<br>
+It's also easy to combine multiple columns into one by adding, subtracting, multiplying, or dividing the values in on column with the values in another. Here we are inventing a new weather metric that draws from multiple types of weather measurements at once.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+weather %>%
+  mutate(new_metric = (temp/dewp)*humid^(pressure/1000)) %>%
+  select(new_metric, temp, dewp, humid, pressure) %>%
+  head(10)
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT (temp/dewp)*POWER(humid, pressure/1000) AS new_metric,
+         temp,
+         dewp,
+         humid,
+         pressure
+  FROM weather
+  LIMIT 10
+  "
+  )
+```
+<br>
+*A note on dates: Like strings and numbers, date columns can also be manipulated. R and SQL have their own strengths when it comes to manipulating dates in different ways. We aren't covering date manipulation here because of the way R is handling the dates. Since we are using SQL syntax within R, we don't have the ability to fully explore the differences.*
+<br>
+<br>
+**By learning how to manipulate our data when querying, we can extend the usefulness of our databases!**
+
+# Pivoting
+When the columns in a database table have the information we need but the table isn't structured how we would like it to be, we can use pivoting! To pivot a data table is to essentially take one column of data and flip it so that each possible value gets its own row. This is different from simply transposing our data like in Excel, which just turns a table 90 degrees so the columns are rows and the rows are columns. Let's see an example of why we would want to pivot and pivoting in action.
+
+We want to know how many flights each carrier had each month.
+Without pivoting, we get 185 rows and 3 columns for month, carrier, and count.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  group_by(month, carrier) %>%
+  count()
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, "
+  SELECT month, carrier, COUNT(*)
+  FROM flights
+  GROUP BY month, carrier
+  "
+  )
+```
+<br>
+We can pivot so that each carrier has its own column, which means each month will be represented by a single row.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  group_by(month, carrier) %>%
+  count() %>%
+  pivot_wider(id_cols = month,
+              names_from = carrier,
+              values_from = n) # pivot_wider() makes this really simple and intuitive
+```
+<br>
+
+##### SQL
+```{r class.source = "sqlcode"}
+dbGetQuery(
+  con, " 
+  WITH flightCounts AS
+        (SELECT month, carrier, COUNT(*) AS counted
+        FROM flights
+        GROUP BY month, carrier)
+        
+  SELECT month,
+  SUM(CASE WHEN carrier == '9E' THEN counted ELSE 0 END) AS `9E`,
+  SUM(CASE WHEN carrier == 'AA' THEN counted ELSE 0 END) AS `AA`,
+  SUM(CASE WHEN carrier == 'AS' THEN counted ELSE 0 END) AS `AS`,
+  SUM(CASE WHEN carrier == 'B6' THEN counted ELSE 0 END) AS `B6`,
+  SUM(CASE WHEN carrier == 'DL' THEN counted ELSE 0 END) AS `DL`,
+  SUM(CASE WHEN carrier == 'EV' THEN counted ELSE 0 END) AS `EV`,
+  SUM(CASE WHEN carrier == 'F9' THEN counted ELSE 0 END) AS `F9`,
+  SUM(CASE WHEN carrier == 'FL' THEN counted ELSE 0 END) AS `FL`,
+  SUM(CASE WHEN carrier == 'HA' THEN counted ELSE 0 END) AS `HA`,
+  SUM(CASE WHEN carrier == 'MQ' THEN counted ELSE 0 END) AS `MQ`,
+  SUM(CASE WHEN carrier == 'OO' THEN counted ELSE 0 END) AS `OO`,
+  SUM(CASE WHEN carrier == 'UA' THEN counted ELSE 0 END) AS `UA`,
+  SUM(CASE WHEN carrier == 'US' THEN counted ELSE 0 END) AS `US`,
+  SUM(CASE WHEN carrier == 'VX' THEN counted ELSE 0 END) AS `VX`,
+  SUM(CASE WHEN carrier == 'WN' THEN counted ELSE 0 END) AS `WN`,
+  SUM(CASE WHEN carrier == 'YV' THEN counted ELSE 0 END) AS `YV`
+  FROM flightCounts
+  GROUP BY month
+  ORDER BY month
+  "
+  )
+```
+<br>
+It's the same information without or with pivoting, but the pivot made it easier to look at and interpret. The tidyverse has multiple built-in pivoting functions. Several versions (i.e, "flavors") of SQL do not have built-in pivoting, but CASE WHEN is a way around that. A key difference is that when doing this in SQL, we have to know the possible values of the column we are pivoting, whereas R figures it out on its own.
+
+How can we get a simple list of all possible carriers so we know which columns we want to create? The tidyverse and SQL both have simple functions that pull the values of a column out for us.
+
+In R, the list is horizontal, separated by spaces. These are all the possible carriers, which became individual columns.
+
+##### R (tidyverse)
+```{r class.source = "rcode"}
+flights %>%
+  distinct(carrier) %>%
+  pull(carrier)
+```
+<br>
+
+In SQL, the list is horizontal or vertical, depending on what we choose. Here we'll separate the list by spaces like R did automatically.
+
+##### SQL
+```{r class.source = "sqlcode"}
+# SQL doesn't like us layering STRING_AGG() and DISTINCT() here, which is why we use the CTE "flightsPull"
+dbGetQuery(
+  con, "
+  WITH flightsPull AS (SELECT DISTINCT(carrier) FROM flights)
+  
+  SELECT STRING_AGG(carrier, ' ')
+  FROM flightsPull
+  "
+  )
+```
+<br>
+If we hadn't used pull() or STRING_AGG() above, we would have gotten a one-column, sixteen-row data frame. These functions are just another way of simplifying what we see.
+<br>
+<br>
+**Pivoting lets us change how data are shown so we can keep our data outputs clear and concise.**
+
+# Thanks for visiting!
+I hope you learned something new about working with data in the R tidyverse and SQL.
+
+If you would like to discuss, add to this document, or collaborate, get in touch!
+
